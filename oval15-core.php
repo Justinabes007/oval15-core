@@ -8,7 +8,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('OVAL15_CORE_VERSION', '0.3.1');
+define('OVAL15_CORE_VERSION', '0.4.0');
 
 require __DIR__ . '/includes/Admin/Settings.php';
 require __DIR__ . '/includes/Compat/UnhookTheme.php';
@@ -16,6 +16,7 @@ require __DIR__ . '/includes/Checkout/Flow.php';
 require __DIR__ . '/includes/Registration/Endpoint.php';
 require __DIR__ . '/includes/Notifications/Emails.php';
 require __DIR__ . '/includes/Admin/Approvals.php'; 
+require __DIR__ . '/includes/Integrations/Webhooks.php'; 
 
 
 add_action('plugins_loaded', function () {
@@ -36,4 +37,5 @@ add_action('plugins_loaded', function () {
     \Oval15\Core\Registration\Endpoint::init();
     \Oval15\Core\Notifications\Emails::init();
     \Oval15\Core\Admin\Approvals::init();
+    \Oval15\Core\Integrations\Webhooks::init();
 });
