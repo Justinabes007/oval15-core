@@ -14,7 +14,14 @@ class Settings {
     }
 
     public static function menu() {
-        add_submenu_page('woocommerce', 'Oval15 Core', 'Oval15 Core', 'manage_woocommerce', self::OPTION, [__CLASS__, 'render']);
+        add_submenu_page(
+            'woocommerce',
+            'Oval15 Core',
+            'Oval15 Core',
+            'manage_woocommerce',
+            self::OPTION,
+            [__CLASS__, 'render']
+        );
     }
 
     public static function render() {
@@ -42,8 +49,8 @@ class Settings {
     public static function register() {
         register_setting(self::OPTION, self::OPTION);
 
-        // ========== General ==========
-        add_settings_section('main', 'General', function() {
+        /* ========== General ========== */
+        add_settings_section('main', 'General', function () {
             echo '<p>Enable Pay-First and configure the Complete Registration page.</p>';
         }, self::OPTION);
 
@@ -53,26 +60,35 @@ class Settings {
         add_settings_field('sla_hours', 'Approval ETA (hours)', [__CLASS__, 'field_sla'], self::OPTION, 'main');
         add_settings_field('support_email', 'Support email', [__CLASS__, 'field_support'], self::OPTION, 'main');
 
-        // ========== Emails ==========
+        /* ========== Media (Video) ========== */
+        add_settings_section('media', 'Media (Video)', function () {
+            echo '<p>Control allowed video providers and direct upload limits.</p>';
+        }, self::OPTION);
+
+        add_settings_field('video_hosts', 'Allowed video hosts', [__CLASS__, 'field_video_hosts'], self::OPTION, 'media');
+        add_settings_field('video_uploads', 'Allow direct video uploads', [__CLASS__, 'field_video_uploads'], self::OPTION, 'media');
+        add_settings_field('video_max_mb', 'Max upload size (MB)', [__CLASS__, 'field_video_max_mb'], self::OPTION, 'media');
+
+        /* ========== Emails ========== */
         add_settings_section('emails', 'Emails', function () {
             echo '<p>Control Welcome/Decline emails and disable built-in Woo/Subscriptions emails if desired.</p>';
         }, self::OPTION);
 
-        // Welcome controls
+        // Welcome
         add_settings_field(Emails::OPT_SEND_WELCOME, 'Send “Welcome to Oval15” on approval', [__CLASS__, 'field_send_welcome'], self::OPTION, 'emails');
         add_settings_field(Emails::OPT_WELCOME_SUBJ, 'Welcome email subject', [__CLASS__, 'field_welcome_subject'], self::OPTION, 'emails');
         add_settings_field(Emails::OPT_WELCOME_BODY, 'Welcome email body (HTML, tokens allowed)', [__CLASS__, 'field_welcome_body'], self::OPTION, 'emails');
         add_settings_field('preview_welcome', 'Preview Welcome email', [__CLASS__, 'field_preview_welcome'], self::OPTION, 'emails');
         add_settings_field('send_test_welcome', 'Send test Welcome email', [__CLASS__, 'field_send_test_welcome'], self::OPTION, 'emails');
 
-        // Decline controls (NEW)
+        // Decline
         add_settings_field(Emails::OPT_SEND_DECLINE, 'Send Decline email on rejection', [__CLASS__, 'field_send_decline'], self::OPTION, 'emails');
         add_settings_field(Emails::OPT_DECLINE_SUBJ, 'Decline email subject', [__CLASS__, 'field_decline_subject'], self::OPTION, 'emails');
         add_settings_field(Emails::OPT_DECLINE_BODY, 'Decline email body (HTML, tokens allowed)', [__CLASS__, 'field_decline_body'], self::OPTION, 'emails');
         add_settings_field('preview_decline', 'Preview Decline email', [__CLASS__, 'field_preview_decline'], self::OPTION, 'emails');
         add_settings_field('send_test_decline', 'Send test Decline email', [__CLASS__, 'field_send_test_decline'], self::OPTION, 'emails');
 
-        // Disable built-in emails
+        // Disable built-ins
         add_settings_field('disable_wc_emails', 'Disable Woo/Subscriptions emails', [__CLASS__, 'field_disable_wc_emails'], self::OPTION, 'emails');
     }
 
@@ -134,7 +150,7 @@ class Settings {
         echo '<a href="'.esc_url($url).'" class="button">Send test Welcome to me</a>';
     }
 
-    /* ---------- Emails: Decline (NEW) ---------- */
+    /* ---------- Emails: Decline ---------- */
     public static function field_send_decline() {
         $v = get_option(self::OPTION);
         $enabled = is_array($v) ? !empty($v[Emails::OPT_SEND_DECLINE]) : false; // default OFF
@@ -176,31 +192,22 @@ class Settings {
         echo '</fieldset>';
         echo '<p class="description">Select any built-in emails you want to disable to avoid duplicates or unwanted messages.</p>';
     }
-}
 
-// In register():
-add_settings_section('media', 'Media (Video)', function () {
-    echo '<p>Control allowed video providers and direct upload limits.</p>';
-}, self::OPTION);
-
-add_settings_field('video_hosts', 'Allowed video hosts', [__CLASS__, 'field_video_hosts'], self::OPTION, 'media');
-add_settings_field('video_uploads', 'Allow direct video uploads', [__CLASS__, 'field_video_uploads'], self::OPTION, 'media');
-add_settings_field('video_max_mb', 'Max upload size (MB)', [__CLASS__, 'field_video_max_mb'], self::OPTION, 'media');
-
-// Add these methods:
-public static function field_video_hosts() {
-    $v = get_option(self::OPTION);
-    $hosts = is_array($v) ? ($v['video_hosts'] ?? 'youtube.com, youtu.be, vimeo.com') : 'youtube.com, youtu.be, vimeo.com';
-    echo '<input type="text" name="'.esc_attr(self::OPTION).'[video_hosts]" value="'.esc_attr($hosts).'" class="regular-text">';
-    echo '<p class="description">Comma-separated hostnames. Only links from these hosts will be accepted (leave blank to accept any link).</p>';
-}
-public static function field_video_uploads() {
-    $v = get_option(self::OPTION);
-    $on = is_array($v) ? !empty($v['video_uploads']) : false;
-    echo '<label><input type="checkbox" name="'.esc_attr(self::OPTION).'[video_uploads]" value="1" '.checked($on, true, false).'> Enable direct uploads (mp4/webm/mov)</label>';
-}
-public static function field_video_max_mb() {
-    $v = get_option(self::OPTION);
-    $mb = is_array($v) ? ($v['video_max_mb'] ?? 100) : 100;
-    echo '<input type="number" name="'.esc_attr(self::OPTION).'[video_max_mb]" value="'.esc_attr((int)$mb).'" min="10" step="10" class="small-text"> MB';
+    /* ---------- Media fields (Video) ---------- */
+    public static function field_video_hosts() {
+        $v = get_option(self::OPTION);
+        $hosts = is_array($v) ? ($v['video_hosts'] ?? 'youtube.com, youtu.be, vimeo.com') : 'youtube.com, youtu.be, vimeo.com';
+        echo '<input type="text" name="'.esc_attr(self::OPTION).'[video_hosts]" value="'.esc_attr($hosts).'" class="regular-text">';
+        echo '<p class="description">Comma-separated hostnames. Only links from these hosts will be accepted (leave blank to accept any link).</p>';
+    }
+    public static function field_video_uploads() {
+        $v = get_option(self::OPTION);
+        $on = is_array($v) ? !empty($v['video_uploads']) : false;
+        echo '<label><input type="checkbox" name="'.esc_attr(self::OPTION).'[video_uploads]" value="1" '.checked($on, true, false).'> Enable direct uploads (mp4/webm/mov)</label>';
+    }
+    public static function field_video_max_mb() {
+        $v = get_option(self::OPTION);
+        $mb = is_array($v) ? ($v['video_max_mb'] ?? 100) : 100;
+        echo '<input type="number" name="'.esc_attr(self::OPTION).'[video_max_mb]" value="'.esc_attr((int)$mb).'" min="10" step="10" class="small-text"> MB';
+    }
 }
