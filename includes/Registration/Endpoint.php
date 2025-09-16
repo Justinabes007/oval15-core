@@ -12,36 +12,25 @@ class Endpoint {
         add_shortcode('oval15_complete_registration', [__CLASS__, 'render_shortcode']);
     }
 
-    /* -------------------------------------------------------------
-     * Shortcode entry
-     * ------------------------------------------------------------- */
     public static function render_shortcode($atts = []) {
-        // Ensure WooCommerce exists
         if (!function_exists('wc_get_order')) {
             return '<div class="woocommerce-error">WooCommerce is not available.</div>';
         }
 
-        // Validate query params
-        $order_id = isset($_GET['order']) ? absint($_GET['order']) : 0;
-        $order_key = isset($_GET['key']) ? sanitize_text_field(wp_unslash($_GET['key'])) : '';
-        $alt_token = isset($_GET['k'])   ? sanitize_text_field(wp_unslash($_GET['k']))   : '';
-        
-        // Prefer WooCommerce order key; fall back to legacy/custom token if present and matches meta
-        $valid = false;
-        if ($order_key && $order_key === $order->get_order_key()) {
-            $valid = true;
-        } elseif ($alt_token) {
-            $saved = (string) $order->get_meta('_oval15_regtoken'); // only if you ever set this
-            if ($saved && hash_equals($saved, $alt_token)) {
-                $valid = true;
-            }
-        }
-        
-        if (!$valid) {
-            return '<div class="woocommerce-error">Invalid registration link. Order key mismatch.</div>';
+        // ---- Resolve order id & key defensively ----
+        $order_id  = isset($_GET['order']) ? absint($_GET['order']) : 0;
+        if (!$order_id && isset($_GET['order-received'])) {
+            $order_id = absint($_GET['order-received']); // Woo thankyou page param
         }
 
-        if (!$order_id || !$order_key) {
+        $order_key = isset($_GET['key']) ? sanitize_text_field(wp_unslash($_GET['key'])) : '';
+
+        // Fallback: if we only have a key, try to resolve order id from it
+        if (!$order_id && $order_key && function_exists('wc_get_order_id_by_order_key')) {
+            $order_id = absint(wc_get_order_id_by_order_key($order_key));
+        }
+
+        if (!$order_id) {
             return '<div class="woocommerce-error">Invalid registration link. Missing order information.</div>';
         }
 
@@ -50,30 +39,48 @@ class Endpoint {
             return '<div class="woocommerce-error">Invalid registration link. Order not found.</div>';
         }
 
-        // Sanity on status (paid orders are usually 'processing' or 'completed')
+        // ---- Validate key (prefer WooCommerce order key; optional legacy token fallback) ----
+        $valid = false;
+        if ($order_key && hash_equals((string) $order->get_order_key(), (string) $order_key)) {
+            $valid = true;
+        } else {
+            // Legacy/custom token fallback (only if you ever stored one)
+            $legacy = isset($_GET['k']) ? sanitize_text_field(wp_unslash($_GET['k'])) : '';
+            if ($legacy) {
+                $saved = (string) $order->get_meta('_oval15_regtoken');
+                if ($saved && hash_equals($saved, $legacy)) {
+                    $valid = true;
+                }
+            }
+        }
+
+        if (!$valid) {
+            return '<div class="woocommerce-error">Invalid registration link. Order key mismatch.</div>';
+        }
+
+        // ---- Status sanity (default: allow processing/completed) ----
         $status = $order->get_status();
         $allowed_statuses = apply_filters('oval15/complete_reg_allowed_statuses', ['processing','completed']);
         if (!in_array($status, $allowed_statuses, true)) {
             return '<div class="woocommerce-info">Your order is currently <strong>'.esc_html($status).'</strong>. Once payment is confirmed, you can complete your registration.</div>';
         }
 
-        // Prevent duplicate completion
+        // ---- Prevent duplicate completion ----
         $done_user = (int) $order->get_meta('_oval15_registration_user');
         if ($done_user > 0) {
             $account = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : home_url('/my-account/');
-            return self::intro_html($order) .
-                   '<div class="woocommerce-message">Registration was already completed for this order.</div>' .
-                   '<p><a class="button" href="'.esc_url($account).'">Go to My Account</a></p>';
+            return self::intro_html($order)
+                . '<div class="woocommerce-message">Registration was already completed for this order.</div>'
+                . '<p><a class="button" href="'.esc_url($account).'">Go to My Account</a></p>';
         }
 
-        // Handle POST
+        // ---- Handle submit ----
         $notice = '';
         if (!empty($_POST['oval15_do_registration'])) {
             $resp = self::handle_submit($order);
             if (is_wp_error($resp)) {
                 $notice = '<div class="woocommerce-error">'.esc_html($resp->get_error_message()).'</div>';
             } else {
-                // Success screen
                 $account = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : home_url('/my-account/');
                 $opt = get_option(Settings::OPTION, []);
                 $sla = is_array($opt) ? (int)($opt['sla_hours'] ?? 48) : 48;
@@ -96,34 +103,31 @@ class Endpoint {
             }
         }
 
-        // Render form
+        // ---- Render form ----
         return $notice . self::intro_html($order) . self::form_html($order);
     }
 
-    /* -------------------------------------------------------------
-     * Intro block (tokenized, editable in settings)
-     * ------------------------------------------------------------- */
+    /* ---------------- Intro block ---------------- */
     private static function intro_html(\WC_Order $order) {
         $opt = get_option(Settings::OPTION, []);
         $intro = is_array($opt) ? ($opt['intro_html'] ?? '') : '';
 
-        // Build tokens
         $items = [];
         foreach ($order->get_items() as $it) {
             $items[] = $it->get_name().' × '.$it->get_quantity();
         }
         $product_list = $items ? implode(', ', $items) : '';
-        $total = function_exists('wc_price') ? wc_price($order->get_total(), ['currency'=>$order->get_currency()]) : ( $order->get_total().' '.$order->get_currency() );
+        $total = function_exists('wc_price') ? wc_price($order->get_total(), ['currency'=>$order->get_currency()]) : ($order->get_total().' '.$order->get_currency());
         $sla = is_array($opt) ? (int)($opt['sla_hours'] ?? 48) : 48;
         $support = is_array($opt) ? ($opt['support_email'] ?? get_option('admin_email')) : get_option('admin_email');
 
         $tokens = [
             '{order_number}'  => (string) $order->get_order_number(),
-            '{billing_email}' => esc_html( $order->get_billing_email() ),
-            '{product_list}'  => esc_html( $product_list ),
+            '{billing_email}' => esc_html($order->get_billing_email()),
+            '{product_list}'  => esc_html($product_list),
             '{total}'         => $total,
             '{sla_hours}'     => (string) $sla,
-            '{support_email}' => esc_html( $support ),
+            '{support_email}' => esc_html($support),
         ];
 
         if (!$intro) {
@@ -136,9 +140,7 @@ class Endpoint {
         return '<div class="oval15-intro" style="margin-bottom:16px">'.wp_kses_post(wpautop($html)).'</div>';
     }
 
-    /* -------------------------------------------------------------
-     * Form render
-     * ------------------------------------------------------------- */
+    /* ---------------- Form render ---------------- */
     private static function form_html(\WC_Order $order) {
         $billing_email = $order->get_billing_email();
         $opt = get_option(Settings::OPTION, []);
@@ -146,7 +148,6 @@ class Endpoint {
 
         ob_start(); ?>
         <form method="post" enctype="multipart/form-data" class="woocommerce-EditAccountForm edit-account oval15-complete-registration">
-
             <?php wp_nonce_field('oval15_complete_registration', '_oval15_nonce'); ?>
             <input type="hidden" name="oval15_do_registration" value="1">
 
@@ -168,74 +169,32 @@ class Endpoint {
             <?php endif; ?>
 
             <h3>Personal Details</h3>
-            <p class="form-row form-row-first">
-                <label>First name&nbsp;<span class="required">*</span></label>
-                <input type="text" class="input-text" name="first_name" required>
+            <p class="form-row form-row-first"><label>First name&nbsp;<span class="required">*</span></label><input type="text" class="input-text" name="first_name" required></p>
+            <p class="form-row form-row-last"><label>Last name&nbsp;<span class="required">*</span></label><input type="text" class="input-text" name="last_name" required></p>
+            <p class="form-row form-row-first"><label>Contact number</label><input type="tel" class="input-text" name="contact_number"></p>
+            <p class="form-row form-row-last"><label>Date of Birth</label><input type="date" class="input-text" name="dob"></p>
+            <p class="form-row form-row-first"><label>Gender</label>
+                <select name="gender"><option value="">Select…</option><option>Male</option><option>Female</option><option>Other</option></select>
             </p>
-            <p class="form-row form-row-last">
-                <label>Last name&nbsp;<span class="required">*</span></label>
-                <input type="text" class="input-text" name="last_name" required>
-            </p>
-            <p class="form-row form-row-first">
-                <label>Contact number</label>
-                <input type="tel" class="input-text" name="contact_number">
-            </p>
-            <p class="form-row form-row-last">
-                <label>Date of Birth</label>
-                <input type="date" class="input-text" name="dob">
-            </p>
-            <p class="form-row form-row-first">
-                <label>Gender</label>
-                <select name="gender">
-                    <option value="">Select…</option>
-                    <option>Male</option>
-                    <option>Female</option>
-                    <option>Other</option>
-                </select>
-            </p>
-            <p class="form-row form-row-last">
-                <label>Nationality</label>
-                <input type="text" class="input-text" name="nation">
-            </p>
-            <p class="form-row form-row-first">
-                <label>Current Country</label>
-                <input type="text" class="input-text" name="current_location_country">
-            </p>
-            <p class="form-row form-row-last">
-                <label>Height (cm)</label>
-                <input type="number" class="input-text" name="height" step="1" min="0">
-            </p>
-            <p class="form-row form-row-first">
-                <label>Weight (kg)</label>
-                <input type="number" class="input-text" name="weight" step="0.1" min="0">
-            </p>
-            <p class="form-row form-row-last">
-                <label>Years playing</label>
-                <input type="number" class="input-text" name="years" step="1" min="0">
-            </p>
-            <p class="form-row form-row-first">
-                <label>Months into current year</label>
-                <input type="number" class="input-text" name="months" step="1" min="0" max="12">
-            </p>
+            <p class="form-row form-row-last"><label>Nationality</label><input type="text" class="input-text" name="nation"></p>
+            <p class="form-row form-row-first"><label>Current Country</label><input type="text" class="input-text" name="current_location_country"></p>
+            <p class="form-row form-row-last"><label>Height (cm)</label><input type="number" class="input-text" name="height" step="1" min="0"></p>
+            <p class="form-row form-row-first"><label>Weight (kg)</label><input type="number" class="input-text" name="weight" step="0.1" min="0"></p>
+            <p class="form-row form-row-last"><label>Years playing</label><input type="number" class="input-text" name="years" step="1" min="0"></p>
+            <p class="form-row form-row-first"><label>Months into current year</label><input type="number" class="input-text" name="months" step="1" min="0" max="12"></p>
 
             <h3>Positions</h3>
-            <p class="form-row">
-                <label>Main Position</label>
+            <p class="form-row"><label>Main Position</label>
                 <select name="main-position">
                     <?php
                     $opts = ['','Prop (1)','Hooker','Prop (3)','Lock (4)','Lock (5)','Flank (Openside)','Flank (Blindside)','No 8','Scrumhalf','Flyhalf','Inside Centre (12)','Outside Centre (13)','Wing','Fullback','Utility Back'];
-                    foreach ($opts as $o) {
-                        echo '<option value="'.esc_attr($o).'">'.esc_html($o ?: 'Select…').'</option>';
-                    }
+                    foreach ($opts as $o) echo '<option value="'.esc_attr($o).'">'.esc_html($o ?: 'Select…').'</option>';
                     ?>
                 </select>
             </p>
-            <p class="form-row">
-                <label>Secondary Positions (Ctrl/Cmd to select multiple)</label>
+            <p class="form-row"><label>Secondary Positions (Ctrl/Cmd to select multiple)</label>
                 <select name="secondary-position[]" multiple size="6">
-                    <?php foreach ($opts as $o) { if ($o==='') continue;
-                        echo '<option value="'.esc_attr($o).'">'.esc_html($o).'</option>';
-                    } ?>
+                    <?php foreach ($opts as $o) { if ($o==='') continue; echo '<option value="'.esc_attr($o).'">'.esc_html($o).'</option>'; } ?>
                 </select>
             </p>
 
@@ -269,15 +228,14 @@ class Endpoint {
             <h3>Media</h3>
             <?php
             $hosts_hint = '';
-            $opt = get_option(Settings::OPTION, []);
             if (is_array($opt) && !empty($opt['video_hosts'])) {
                 $hosts_hint = ' Allowed hosts: '.esc_html($opt['video_hosts']).'.';
             }
             ?>
             <p class="form-row"><label>Video links (YouTube/Vimeo; up to 3)</label>
-                <input type="url" class="input-text" name="v_links[]" placeholder="https://" >
-                <input type="url" class="input-text" name="v_links[]" placeholder="https://" >
-                <input type="url" class="input-text" name="v_links[]" placeholder="https://" >
+                <input type="url" class="input-text" name="v_links[]" placeholder="https://">
+                <input type="url" class="input-text" name="v_links[]" placeholder="https://">
+                <input type="url" class="input-text" name="v_links[]" placeholder="https://">
                 <small><?php echo $hosts_hint; ?></small>
             </p>
             <?php if ($allow_upload) : ?>
@@ -287,17 +245,12 @@ class Endpoint {
             <?php endif; ?>
 
             <h3>Strengths & Achievements</h3>
-            <p class="form-row">
-                <label>Strengths of game &amp; Rugby Achievements (max 50 words)</label>
+            <p class="form-row"><label>Strengths of game &amp; Rugby Achievements (max 50 words)</label>
                 <textarea name="p_profile" rows="4" maxlength="800" placeholder="Max 50 words"></textarea>
             </p>
 
-            <p class="form-row">
-                <label><input type="checkbox" name="oval15_sole_rep" value="yes"> I confirm Oval15 is my sole representative</label>
-            </p>
-            <p class="form-row">
-                <label><input type="checkbox" name="marketing_consent" value="yes"> I agree to receive occasional updates</label>
-            </p>
+            <p class="form-row"><label><input type="checkbox" name="oval15_sole_rep" value="yes"> I confirm Oval15 is my sole representative</label></p>
+            <p class="form-row"><label><input type="checkbox" name="marketing_consent" value="yes"> I agree to receive occasional updates</label></p>
 
             <p class="form-row"><button type="submit" class="button alt">Submit Registration</button></p>
         </form>
@@ -305,9 +258,7 @@ class Endpoint {
         return ob_get_clean();
     }
 
-    /* -------------------------------------------------------------
-     * POST handler
-     * ------------------------------------------------------------- */
+    /* ---------------- POST handler ---------------- */
     private static function handle_submit(\WC_Order $order) {
         if (!isset($_POST['_oval15_nonce']) || !wp_verify_nonce($_POST['_oval15_nonce'], 'oval15_complete_registration')) {
             return new \WP_Error('oval15_nonce', 'Security check failed.');
@@ -318,10 +269,8 @@ class Endpoint {
             return new \WP_Error('oval15_email', 'Your order is missing a valid billing email.');
         }
 
-        // Account logic
         $user_id = get_current_user_id();
         if (!$user_id) {
-            // If an account already exists for billing email, require login to prevent hijack
             $existing = get_user_by('email', $billing_email);
             if ($existing) {
                 $login = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : wp_login_url();
@@ -344,20 +293,16 @@ class Endpoint {
             if (is_wp_error($user_id)) {
                 return new \WP_Error('oval15_user', 'Could not create your account: '.$user_id->get_error_message());
             }
-
-            // Log them in
             wp_set_current_user($user_id);
             wp_set_auth_cookie($user_id, true);
         }
 
-        // Required fields
         $first = sanitize_text_field($_POST['first_name'] ?? '');
         $last  = sanitize_text_field($_POST['last_name'] ?? '');
         if ($first === '' || $last === '') {
             return new \WP_Error('oval15_required', 'Please complete all required fields (first & last name).');
         }
 
-        // 50-word cap
         if (!empty($_POST['p_profile'])) {
             $words = preg_split('/\s+/', trim(wp_strip_all_tags((string) $_POST['p_profile'])));
             if (count($words) > 50) {
@@ -365,11 +310,9 @@ class Endpoint {
             }
         }
 
-        // Save core user meta
         update_user_meta($user_id, 'first_name', $first);
         update_user_meta($user_id, 'last_name',  $last);
 
-        // Scalars
         $map = [
             'contact_number','dob','p_profile','nation','current_location_country','gender',
             'height','weight','years','months','level','league',
@@ -382,7 +325,6 @@ class Endpoint {
             }
         }
 
-        // Arrays → CSV
         if (isset($_POST['secondary-position'])) {
             $arr = array_map('sanitize_text_field', (array) $_POST['secondary-position']);
             update_user_meta($user_id, 'secondary-position', implode(',', $arr));
@@ -396,11 +338,9 @@ class Endpoint {
             update_user_meta($user_id, 'passport', implode(',', $arr));
         }
 
-        // Flags
         update_user_meta($user_id, '_oval15_sole_rep', !empty($_POST['oval15_sole_rep']) ? 'yes' : '');
         update_user_meta($user_id, '_oval15_marketing_consent', !empty($_POST['marketing_consent']) ? 'yes' : '');
 
-        // Video links + optional upload
         $opt = get_option(Settings::OPTION, []);
         $hosts = [];
         if (is_array($opt) && !empty($opt['video_hosts'])) {
@@ -428,7 +368,6 @@ class Endpoint {
             update_user_meta($user_id, 'v_upload_id', (int) $attach_id);
         }
 
-        // Link order to customer and mark complete-registration done
         if (!$order->get_user_id()) {
             $order->set_customer_id($user_id);
         }
@@ -436,20 +375,15 @@ class Endpoint {
         $order->update_meta_data('_oval15_registration_completed', current_time('mysql'));
         $order->save();
 
-        // Ensure approval status default
         if (!get_user_meta($user_id, '_oval15_approved', true)) {
             update_user_meta($user_id, '_oval15_approved', 'no');
         }
 
-        // Emit event for integrations
         do_action('oval15/registration_completed', $user_id, $order->get_id());
 
         return true;
     }
 
-    /* -------------------------------------------------------------
-     * Helpers
-     * ------------------------------------------------------------- */
     private static function unique_username_from_email($email) {
         $base = sanitize_user(current(explode('@', $email)), true);
         if ($base === '') $base = 'user';
