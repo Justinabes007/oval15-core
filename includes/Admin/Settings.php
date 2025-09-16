@@ -177,3 +177,30 @@ class Settings {
         echo '<p class="description">Select any built-in emails you want to disable to avoid duplicates or unwanted messages.</p>';
     }
 }
+
+// In register():
+add_settings_section('media', 'Media (Video)', function () {
+    echo '<p>Control allowed video providers and direct upload limits.</p>';
+}, self::OPTION);
+
+add_settings_field('video_hosts', 'Allowed video hosts', [__CLASS__, 'field_video_hosts'], self::OPTION, 'media');
+add_settings_field('video_uploads', 'Allow direct video uploads', [__CLASS__, 'field_video_uploads'], self::OPTION, 'media');
+add_settings_field('video_max_mb', 'Max upload size (MB)', [__CLASS__, 'field_video_max_mb'], self::OPTION, 'media');
+
+// Add these methods:
+public static function field_video_hosts() {
+    $v = get_option(self::OPTION);
+    $hosts = is_array($v) ? ($v['video_hosts'] ?? 'youtube.com, youtu.be, vimeo.com') : 'youtube.com, youtu.be, vimeo.com';
+    echo '<input type="text" name="'.esc_attr(self::OPTION).'[video_hosts]" value="'.esc_attr($hosts).'" class="regular-text">';
+    echo '<p class="description">Comma-separated hostnames. Only links from these hosts will be accepted (leave blank to accept any link).</p>';
+}
+public static function field_video_uploads() {
+    $v = get_option(self::OPTION);
+    $on = is_array($v) ? !empty($v['video_uploads']) : false;
+    echo '<label><input type="checkbox" name="'.esc_attr(self::OPTION).'[video_uploads]" value="1" '.checked($on, true, false).'> Enable direct uploads (mp4/webm/mov)</label>';
+}
+public static function field_video_max_mb() {
+    $v = get_option(self::OPTION);
+    $mb = is_array($v) ? ($v['video_max_mb'] ?? 100) : 100;
+    echo '<input type="number" name="'.esc_attr(self::OPTION).'[video_max_mb]" value="'.esc_attr((int)$mb).'" min="10" step="10" class="small-text"> MB';
+}

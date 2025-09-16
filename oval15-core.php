@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Oval15 Core
  * Description: Core workflows for Oval15 (Pay-First checkout, tokenized Complete Registration, compatibility shims, and admin settings).
- * Version: 0.3.1
+ * Version: 0.4.1
  * Author: Oval15
  */
 
 if (!defined('ABSPATH')) exit;
 
-define('OVAL15_CORE_VERSION', '0.4.0');
+define('OVAL15_CORE_VERSION', '0.4.2');
 
 require __DIR__ . '/includes/Admin/Settings.php';
 require __DIR__ . '/includes/Compat/UnhookTheme.php';
@@ -17,6 +17,8 @@ require __DIR__ . '/includes/Registration/Endpoint.php';
 require __DIR__ . '/includes/Notifications/Emails.php';
 require __DIR__ . '/includes/Admin/Approvals.php'; 
 require __DIR__ . '/includes/Integrations/Webhooks.php'; 
+require __DIR__ . '/includes/Registration/ProfileEdit.php';
+require __DIR__ . '/includes/Media/Video.php';
 
 
 add_action('plugins_loaded', function () {
@@ -38,4 +40,5 @@ add_action('plugins_loaded', function () {
     \Oval15\Core\Notifications\Emails::init();
     \Oval15\Core\Admin\Approvals::init();
     \Oval15\Core\Integrations\Webhooks::init();
+    \Oval15\Core\Registration\ProfileEdit::init();
 });

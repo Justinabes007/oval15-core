@@ -4,11 +4,15 @@ namespace Oval15\Core\Integrations;
 if (!defined('ABSPATH')) exit;
 
 class Webhooks {
-    const OPT = 'oval15_webhooks';
+    const OPT   = 'oval15_webhooks';
     const GROUP = 'oval15_webhooks';
-    private static $backoff = [60, 300, 1800, 7200, 86400]; // 1m,5m,30m,2h,1d
 
-    // Supported topics
+    // Retry backoff: 1m, 5m, 30m, 2h, 1d
+    private static $backoff = [60, 300, 1800, 7200, 86400];
+
+    /* =========================
+     * Topics supported
+     * ========================= */
     public static function topics() {
         return [
             'registration.completed' => 'Player finished Complete Registration',
@@ -16,6 +20,7 @@ class Webhooks {
             'user.declined'          => 'User declined',
             'order.completed'        => 'WooCommerce order completed/thank-you',
             'email.sent'             => 'Plugin email sent (welcome/decline)',
+            'profile.updated'        => 'Player profile updated',
         ];
     }
 
@@ -25,23 +30,25 @@ class Webhooks {
         add_action('admin_post_oval15_webhook_save', [__CLASS__, 'handle_save']);
         add_action('admin_post_oval15_webhook_delete', [__CLASS__, 'handle_delete']);
 
-        // Generic emitter + background deliverer
+        // Generic emitter and queued delivery
         add_action('oval15/event_emit', [__CLASS__, 'emit'], 10, 2);
         if (function_exists('as_enqueue_async_action')) {
             add_action('oval15_deliver_webhook', [__CLASS__, 'deliver_action'], 10, 4);
         }
 
-        // Wire to existing plugin events
+        // Event sources (adapters)
         add_action('oval15/registration_completed', [__CLASS__, 'on_registration_completed'], 10, 2);
         add_action('oval15/user_approved',          [__CLASS__, 'on_user_approved'], 10, 2);
         add_action('oval15/user_declined',          [__CLASS__, 'on_user_declined'], 10, 2);
         add_action('oval15/welcome_email_sent',     [__CLASS__, 'on_welcome_sent'], 10, 2);
         add_action('oval15/decline_email_sent',     [__CLASS__, 'on_decline_sent'], 10, 2);
+        add_action('oval15/profile_updated',        [__CLASS__, 'on_profile_updated'], 10, 2);
         add_action('woocommerce_thankyou',          [__CLASS__, 'on_order_completed'], 20, 1);
     }
 
-    /* ========= Admin ========== */
-
+    /* =========================
+     * Admin UI
+     * ========================= */
     public static function menu() {
         add_submenu_page(
             'woocommerce',
@@ -60,7 +67,7 @@ class Webhooks {
         $topics = self::topics();
 
         echo '<div class="wrap"><h1>Oval15 Webhooks</h1>';
-        echo '<p>Send signed JSON payloads to external endpoints (Zapier/Make, etc.) with retries.</p>';
+        echo '<p>Send signed JSON payloads to external endpoints (Zapier/Make, etc.) in the background with retries.</p>';
 
         // List
         if (empty($eps)) {
@@ -103,7 +110,7 @@ class Webhooks {
         check_admin_referer('oval15_webhook_save');
 
         $url = isset($_POST['url']) ? esc_url_raw($_POST['url']) : '';
-        if (!$url) wp_safe_redirect(admin_url('admin.php?page=oval15_webhooks')); // silent fail
+        if (!$url) wp_safe_redirect(admin_url('admin.php?page=oval15_webhooks'));
 
         $secret = isset($_POST['secret']) ? sanitize_text_field($_POST['secret']) : '';
         $topics = isset($_POST['topics']) ? array_values(array_unique(array_map('sanitize_text_field', (array) $_POST['topics']))) : [];
@@ -137,8 +144,9 @@ class Webhooks {
         exit;
     }
 
-    /* ========= Emit + Deliver ========== */
-
+    /* =========================
+     * Emit + Deliver
+     * ========================= */
     public static function emit($event, $data = []) {
         $eps = get_option(self::OPT, []);
         if (!is_array($eps) || empty($eps)) return;
@@ -181,7 +189,7 @@ class Webhooks {
 
     private static function deliver_now($ep, $event, $body, $attempt) {
         $url = isset($ep['url']) ? $ep['url'] : '';
-        if (!$url) return true; // nothing to do
+        if (!$url) return true;
 
         $secret = isset($ep['secret']) ? (string) $ep['secret'] : '';
         $sig = 'sha256=' . base64_encode(hash_hmac('sha256', $body, $secret, true));
@@ -195,8 +203,8 @@ class Webhooks {
         ];
 
         $resp = wp_remote_post($url, [
-            'timeout' => 5,
-            'blocking'=> true, // background when using Action Scheduler; OK to block briefly
+            'timeout' => 7,
+            'blocking'=> true,
             'headers' => $headers,
             'body'    => $body,
         ]);
@@ -206,73 +214,179 @@ class Webhooks {
         return $code >= 200 && $code < 300;
     }
 
-    /* ========= Event adapters ========== */
+    /* =========================
+     * Event adapters
+     * ========================= */
 
     public static function on_registration_completed($user_id, $order_id) {
-        $user = get_user_by('id', $user_id);
+        $user_obj = self::build_user_object($user_id);
+        $order    = self::build_order_object($order_id);
         $data = [
-            'user_id' => $user_id,
-            'email'   => $user ? $user->user_email : '',
-            'order_id'=> $order_id,
+            'user'    => $user_obj,
+            'order'   => $order,
             'profile' => self::user_profile_snapshot($user_id),
         ];
         do_action('oval15/event_emit', 'registration.completed', $data);
     }
 
     public static function on_user_approved($user_id, $admin_id = 0) {
-        $user = get_user_by('id', $user_id);
         $data = [
-            'user_id'  => $user_id,
-            'email'    => $user ? $user->user_email : '',
-            'approved_by' => (int) $admin_id,
-            'profile'  => self::user_profile_snapshot($user_id),
+            'user'      => self::build_user_object($user_id),
+            'admin_id'  => (int) $admin_id,
+            'profile'   => self::user_profile_snapshot($user_id),
         ];
         do_action('oval15/event_emit', 'user.approved', $data);
     }
 
     public static function on_user_declined($user_id, $admin_id = 0) {
-        $user = get_user_by('id', $user_id);
         $data = [
-            'user_id'  => $user_id,
-            'email'    => $user ? $user->user_email : '',
-            'declined_by' => (int) $admin_id,
-            'profile'  => self::user_profile_snapshot($user_id),
+            'user'      => self::build_user_object($user_id),
+            'admin_id'  => (int) $admin_id,
+            'profile'   => self::user_profile_snapshot($user_id),
         ];
         do_action('oval15/event_emit', 'user.declined', $data);
     }
 
     public static function on_welcome_sent($user_id, $email) {
-        $data = ['user_id' => (int) $user_id, 'email' => (string) $email, 'type' => 'welcome'];
+        $data = [
+            'user' => self::build_user_object($user_id),
+            'type' => 'welcome',
+        ];
         do_action('oval15/event_emit', 'email.sent', $data);
     }
 
     public static function on_decline_sent($user_id, $email) {
-        $data = ['user_id' => (int) $user_id, 'email' => (string) $email, 'type' => 'decline'];
+        $data = [
+            'user' => self::build_user_object($user_id),
+            'type' => 'decline',
+        ];
         do_action('oval15/event_emit', 'email.sent', $data);
     }
 
-    public static function on_order_completed($order_id) {
-        if (!function_exists('wc_get_order')) return;
-        $order = wc_get_order($order_id);
-        if (!$order) return;
+    public static function on_profile_updated($user_id, $changes = []) {
         $data = [
-            'order_id'   => $order_id,
-            'status'     => $order->get_status(),
-            'total'      => (float) $order->get_total(),
-            'currency'   => $order->get_currency(),
-            'email'      => $order->get_billing_email(),
-            'customer_id'=> (int) $order->get_user_id(),
-            'items'      => array_map(function($it){ return ['name'=>$it->get_name(), 'qty'=>$it->get_quantity(), 'total'=>(float) $it->get_total()]; }, $order->get_items()),
+            'user'    => self::build_user_object($user_id),
+            'changes' => $changes,
+            'profile' => self::user_profile_snapshot($user_id),
         ];
+        do_action('oval15/event_emit', 'profile.updated', $data);
+    }
+
+    public static function on_order_completed($order_id) {
+        $order_obj = self::build_order_object($order_id);
+
+        // If we can, enrich with WP user + profile snapshot
+        $user_id = (int) ($order_obj['customer_id'] ?? 0);
+        $data = [
+            'order' => $order_obj,
+        ];
+        if ($user_id > 0) {
+            $data['user']    = self::build_user_object($user_id, $order_id);
+            $data['profile'] = self::user_profile_snapshot($user_id);
+        }
+
         do_action('oval15/event_emit', 'order.completed', $data);
     }
 
+    /* =========================
+     * Builders
+     * ========================= */
+
+    /**
+     * Build a normalized user object with account & billing details.
+     */
+    private static function build_user_object($user_id, $order_id = 0) {
+        $user_id = (int) $user_id;
+        $user    = $user_id ? get_user_by('id', $user_id) : null;
+
+        $first = $user_id ? (string) get_user_meta($user_id, 'first_name', true) : '';
+        $last  = $user_id ? (string) get_user_meta($user_id, 'last_name', true)  : '';
+
+        $obj = [
+            'id'         => $user_id,
+            'email'      => $user ? (string) $user->user_email : '',
+            'username'   => $user ? (string) $user->user_login : '',
+            'first_name' => $first,
+            'last_name'  => $last,
+        ];
+
+        // If an order is provided, include billing name/email fallback
+        if ($order_id && function_exists('wc_get_order')) {
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $obj['billing_email']       = (string) $order->get_billing_email();
+                $obj['billing_first_name']  = (string) $order->get_billing_first_name();
+                $obj['billing_last_name']   = (string) $order->get_billing_last_name();
+                if (!$obj['first_name'] && $obj['billing_first_name']) $obj['first_name'] = $obj['billing_first_name'];
+                if (!$obj['last_name']  && $obj['billing_last_name'])  $obj['last_name']  = $obj['billing_last_name'];
+                if (!$obj['email']      && $obj['billing_email'])      $obj['email']      = $obj['billing_email'];
+            }
+        }
+
+        return $obj;
+    }
+
+    /**
+     * Build a normalized order object with items and billing details.
+     */
+    private static function build_order_object($order_id) {
+        if (!function_exists('wc_get_order')) return ['order_id' => (int) $order_id];
+
+        $order = wc_get_order($order_id);
+        if (!$order) return ['order_id' => (int) $order_id];
+
+        // Items as a normal array (Zapier-friendly)
+        $items = [];
+        $product_ids = [];
+        foreach ($order->get_items() as $item_id => $item) {
+            $pid = (int) $item->get_product_id();
+            if ($pid) $product_ids[] = $pid;
+            $items[] = [
+                'id'    => (int) $item_id,
+                'name'  => $item->get_name(),
+                'qty'   => (int) $item->get_quantity(),
+                'total' => (float) $item->get_total(),
+                'product_id' => $pid,
+            ];
+        }
+
+        return [
+            'order_id'   => (int) $order->get_id(),
+            'status'     => (string) $order->get_status(),
+            'total'      => (float)  $order->get_total(),
+            'currency'   => (string) $order->get_currency(),
+            'email'      => (string) $order->get_billing_email(),
+            'customer_id'=> (int)    $order->get_user_id(),
+            'billing_first_name' => (string) $order->get_billing_first_name(),
+            'billing_last_name'  => (string) $order->get_billing_last_name(),
+            'billing_phone'      => (string) $order->get_billing_phone(),
+            'billing_country'    => (string) $order->get_billing_country(),
+            'billing_city'       => (string) $order->get_billing_city(),
+            'items'       => $items,
+            'product_ids' => array_values(array_unique($product_ids)),
+            // Link to registration user if set
+            'registration_user' => (int) $order->get_meta('_oval15_registration_user'),
+        ];
+    }
+
+    /**
+     * Snapshot of important user meta for integrations.
+     */
     private static function user_profile_snapshot($user_id) {
-        $fields = ['first_name','last_name','gender','nation','current_location_country','height','weight','years','months','level','league','period_1','club_1','period_2','club_2','period_3','club_3','reason','tournament_1','tournament_2','tournament_3','main-position','secondary-position','interested_country','passport','v_link','p_profile'];
+        $fields = [
+            'first_name','last_name','gender','nation','current_location_country',
+            'height','weight','years','months','level','league',
+            'period_1','club_1','period_2','club_2','period_3','club_3','reason',
+            'tournament_1','tournament_2','tournament_3',
+            'main-position','secondary-position',
+            'interested_country','passport',
+            'v_links','v_upload_id','v_link', // legacy primary still included
+            'p_profile','p_photo_id',
+            '_oval15_sole_rep','_oval15_marketing_consent','_oval15_approved',
+        ];
         $out = ['id' => (int) $user_id];
         foreach ($fields as $k) {
-            $v = get_user_meta($user_id, $k, true);
-            $out[$k] = $v;
+            $out[$k] = get_user_meta($user_id, $k, true);
         }
         return $out;
     }
