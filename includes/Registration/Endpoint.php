@@ -24,6 +24,22 @@ class Endpoint {
         // Validate query params
         $order_id = isset($_GET['order']) ? absint($_GET['order']) : 0;
         $order_key = isset($_GET['key']) ? sanitize_text_field(wp_unslash($_GET['key'])) : '';
+        $alt_token = isset($_GET['k'])   ? sanitize_text_field(wp_unslash($_GET['k']))   : '';
+        
+        // Prefer WooCommerce order key; fall back to legacy/custom token if present and matches meta
+        $valid = false;
+        if ($order_key && $order_key === $order->get_order_key()) {
+            $valid = true;
+        } elseif ($alt_token) {
+            $saved = (string) $order->get_meta('_oval15_regtoken'); // only if you ever set this
+            if ($saved && hash_equals($saved, $alt_token)) {
+                $valid = true;
+            }
+        }
+        
+        if (!$valid) {
+            return '<div class="woocommerce-error">Invalid registration link. Order key mismatch.</div>';
+        }
 
         if (!$order_id || !$order_key) {
             return '<div class="woocommerce-error">Invalid registration link. Missing order information.</div>';
@@ -32,10 +48,6 @@ class Endpoint {
         $order = wc_get_order($order_id);
         if (!$order) {
             return '<div class="woocommerce-error">Invalid registration link. Order not found.</div>';
-        }
-
-        if ($order->get_order_key() !== $order_key) {
-            return '<div class="woocommerce-error">Invalid registration link. Order key mismatch.</div>';
         }
 
         // Sanity on status (paid orders are usually 'processing' or 'completed')
