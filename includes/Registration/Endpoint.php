@@ -156,11 +156,12 @@ class Endpoint
             .required { color: #e11d48; }
         </style>
 
-        <form method="post" class="woocommerce-form woocommerce-form-register register" enctype="multipart/form-data">
-            <?php wp_nonce_field('oval15_complete_reg_'.$user_id, '_wpnonce'); ?>
-            <input type="hidden" name="oval15_action" value="complete_registration">
-            <input type="hidden" name="order_id" value="<?php echo esc_attr($order->get_id()); ?>">
-            <input type="hidden" name="order_key" value="<?php echo esc_attr($order->get_order_key()); ?>">
+<form method="post" class="oval15-complete-registration woocommerce-form woocommerce-form-register register" enctype="multipart/form-data">
+    <?php wp_nonce_field('oval15_complete_reg_'.$user_id, '_wpnonce'); ?>
+    <input type="hidden" name="oval15_action" value="complete_registration">
+    <input type="hidden" name="order_id" value="<?php echo esc_attr($order->get_id()); ?>">
+    <input type="hidden" name="order_key" value="<?php echo esc_attr($order->get_order_key()); ?>">
+
 
             <!-- Email -->
             <p class="woocommerce-form-row woocommerce-form-row--wide form-row form-row-wide">
@@ -406,6 +407,49 @@ class Endpoint
             }
         })(jQuery);
         </script>
+        <style>
+.oval15-loading-overlay {
+    display: none;
+    position: fixed;
+    top:0;left:0;right:0;bottom:0;
+    background: rgba(255,255,255,0.85);
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #333;
+}
+.oval15-loading-overlay .spinner {
+    border: 4px solid #e5e7eb;
+    border-top: 4px solid #2563eb;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    animation: spin 1s linear infinite;
+    margin-right:12px;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>
+
+<div class="oval15-loading-overlay" id="oval15-loading">
+    <div class="spinner"></div>
+    <div>Submitting your registration… please wait</div>
+</div>
+
+<script>
+(function($){
+    $('.oval15-complete-registration').on('submit', function(){
+        var $btn = $(this).find('button[type=submit]');
+        $btn.prop('disabled', true).text('Submitting…');
+        $('#oval15-loading').fadeIn(200);
+    });
+})(jQuery);
+</script>
+
+
 
         <?php
         return ob_get_clean();
