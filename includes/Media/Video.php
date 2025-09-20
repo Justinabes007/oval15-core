@@ -6,87 +6,96 @@ if (!defined('ABSPATH')) exit;
 class Video {
 
     /**
-     * Check if a video URL's host is allowed.
+     * Validate a video host against allowed list.
      */
-    public static function host_allowed(string $url, array $allowed_hosts): bool {
-        $host = strtolower(parse_url($url, PHP_URL_HOST) ?: '');
-        if ($host === '') return false;
-        foreach ($allowed_hosts as $h) {
-            $h = strtolower(trim($h));
-            if (!$h) continue;
-            // exact host or subdomain match
-            if ($host === $h || str_ends_with($host, '.'.$h)) {
-                return true;
-            }
+    public static function host_allowed($url, array $allowed_hosts = []) {
+        if (empty($allowed_hosts)) return true; // no restriction
+        $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+        foreach ($allowed_hosts as $allowed) {
+            $allowed = strtolower(trim($allowed));
+            if ($allowed && str_contains($host, $allowed)) return true;
         }
         return false;
     }
 
     /**
-     * Handle a direct video upload and return attachment ID (or WP_Error).
+     * Handle an uploaded video file into WP media library.
+     *
+     * @param array $file - standard $_FILES['field'] array
+     * @param int   $max_mb - maximum size in MB
+     * @return int|\WP_Error attachment ID on success
      */
     public static function handle_upload(array $file, int $max_mb = 100) {
-        if (empty($file['name']) || empty($file['tmp_name'])) {
-            return new \WP_Error('oval15_video_empty', 'No video file provided.');
+        if (empty($file['name'])) {
+            return new \WP_Error('oval15_no_file', 'No video file uploaded.');
         }
 
-        // Size check (in bytes)
-        $size = isset($file['size']) ? (int) $file['size'] : @filesize($file['tmp_name']);
-        if ($size && $size > ($max_mb * 1024 * 1024)) {
-            return new \WP_Error('oval15_video_size', 'Video exceeds the maximum allowed size of '.$max_mb.'MB.');
+        // Ensure WP upload helpers available
+        if (!function_exists('wp_handle_upload')) require_once ABSPATH . 'wp-admin/includes/file.php';
+        if (!function_exists('wp_insert_attachment')) require_once ABSPATH . 'wp-admin/includes/media.php';
+        if (!function_exists('wp_generate_attachment_metadata')) require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        // Size validation
+        $size_mb = isset($file['size']) ? ($file['size'] / 1048576) : 0;
+        if ($size_mb > $max_mb) {
+            return new \WP_Error('oval15_file_too_large', sprintf('Video exceeds max size of %dMB.', $max_mb));
         }
 
-        // Allow common video mimes
+        // Allowed MIME types
         $mimes = [
             'mp4'  => 'video/mp4',
             'mov'  => 'video/quicktime',
-            'qt'   => 'video/quicktime',
             'webm' => 'video/webm',
-            'm4v'  => 'video/x-m4v',
         ];
 
-        // These helpers are required on the front-end
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/media.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
-
-        // Upload (front-end, so disable form test)
         $overrides = ['test_form' => false, 'mimes' => $mimes];
-        $moved = wp_handle_upload($file, $overrides);
 
-        if (isset($moved['error']) && $moved['error']) {
-            return new \WP_Error('oval15_video_upload', 'Upload failed: ' . $moved['error']);
+        $movefile = wp_handle_upload($file, $overrides);
+        if (isset($movefile['error'])) {
+            return new \WP_Error('oval15_upload_error', $movefile['error']);
         }
 
-        $file_path = $moved['file'];
-        $file_url  = $moved['url'];
-        $check     = wp_check_filetype_and_ext($file_path, basename($file_path), $mimes);
+        $filetype = wp_check_filetype($movefile['file'], $mimes);
 
         $attachment = [
-            'post_mime_type' => $check['type'] ?: ($moved['type'] ?? 'video/mp4'),
-            'post_title'     => sanitize_file_name(pathinfo($file_path, PATHINFO_FILENAME)),
+            'post_mime_type' => $filetype['type'],
+            'post_title'     => sanitize_file_name(basename($movefile['file'])),
             'post_content'   => '',
             'post_status'    => 'inherit',
         ];
 
-        $attach_id = wp_insert_attachment($attachment, $file_path);
+        $attach_id = wp_insert_attachment($attachment, $movefile['file']);
         if (is_wp_error($attach_id)) {
             return $attach_id;
         }
 
-        // Generate metadata if available (don’t hard-fail if host restrictions block it)
-        if (function_exists('wp_generate_attachment_metadata')) {
-            // If for any reason the media helpers weren’t loaded by host, avoid fatal:
-            if (function_exists('wp_read_video_metadata')) {
-                $meta = @wp_generate_attachment_metadata($attach_id, $file_path);
-                if (!empty($meta)) {
-                    wp_update_attachment_metadata($attach_id, $meta);
-                }
-            } else {
-                // Skip metadata quietly; the attachment still works.
-            }
+        // Generate attachment metadata
+        $attach_data = wp_generate_attachment_metadata($attach_id, $movefile['file']);
+        wp_update_attachment_metadata($attach_id, $attach_data);
+
+        return $attach_id;
+    }
+
+    /**
+     * Render a preview of an uploaded video attachment.
+     *
+     * @param int $attachment_id
+     * @param string $size
+     * @return string
+     */
+    public static function render_uploaded($attachment_id, $size = 'medium') {
+        $url = wp_get_attachment_url($attachment_id);
+        if (!$url) return '<em>No video available.</em>';
+
+        $mime = get_post_mime_type($attachment_id);
+        if (strpos($mime, 'video/') !== 0) {
+            return '<a href="'.esc_url($url).'" target="_blank">Download video</a>';
         }
 
-        return (int) $attach_id;
+        return sprintf(
+            '<video controls style="max-width:100%%;border-radius:8px"><source src="%s" type="%s">Your browser does not support video playback.</video>',
+            esc_url($url),
+            esc_attr($mime)
+        );
     }
 }
