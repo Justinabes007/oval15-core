@@ -1,127 +1,130 @@
 <?php
-namespace Oval15\Core\Registration;
+/**
+ * Plugin Name: Oval15 Core
+ * Description: Core workflows for Oval15 (Pay-First checkout, tokenized Complete Registration, compatibility shims, and admin settings).
+ * Version: 0.4.2
+ * Author: Oval15
+ */
 
 if (!defined('ABSPATH')) exit;
 
-use Oval15\Core\Media\Video;
+define('OVAL15_CORE_VERSION', '0.4.2');
 
-class Endpoint {
+require __DIR__ . '/includes/Admin/Settings.php';
+require __DIR__ . '/includes/Compat/UnhookTheme.php';
+require __DIR__ . '/includes/Checkout/Flow.php';
+require __DIR__ . '/includes/Registration/Endpoint.php';
+require __DIR__ . '/includes/Notifications/Emails.php';
+require __DIR__ . '/includes/Admin/Approvals.php'; 
+require __DIR__ . '/includes/Integrations/Webhooks.php'; 
+require __DIR__ . '/includes/Registration/ProfileEdit.php';
+require __DIR__ . '/includes/Media/Video.php';
+require __DIR__ . '/includes/Checkout/ThankyouRedirect.php';
 
+add_action('plugins_loaded', function () {
+    \Oval15\Core\Admin\Settings::init();
+
+    $opt = get_option(\Oval15\Core\Admin\Settings::OPTION, []);
+    $enabled = isset($opt['pay_first']) ? (bool) $opt['pay_first'] : (defined('WP_ENVIRONMENT_TYPE') && WP_ENVIRONMENT_TYPE === 'staging');
+
+    if (!defined('OVAL15_PAY_FIRST')) {
+        define('OVAL15_PAY_FIRST', apply_filters('oval15/pay_first_enabled', $enabled));
+    }
+
+    if (OVAL15_PAY_FIRST) {
+        \Oval15\Core\Compat\UnhookTheme::init();
+    }
+
+    \Oval15\Core\Checkout\ThankyouRedirect::init();
+    \Oval15\Core\Checkout\Flow::init();
+    \Oval15\Core\Registration\Endpoint::init();
+    \Oval15\Core\Notifications\Emails::init();
+    \Oval15\Core\Admin\Approvals::init();
+    \Oval15\Core\Integrations\Webhooks::init();
+    \Oval15\Core\Registration\ProfileEdit::init();
+    \Oval15_Core_Assets::init(); // call the global class instead
+});
+
+/**
+ * Assets class in global namespace
+ */
+class Oval15_Core_Assets {
     public static function init() {
-        add_action('init', [__CLASS__, 'add_endpoint']);
-        add_filter('query_vars', [__CLASS__, 'query_vars']);
-        add_action('template_redirect', [__CLASS__, 'maybe_handle_post']);
-        add_filter('the_content', [__CLASS__, 'render_form']);
+        add_action('wp_enqueue_scripts', [__CLASS__, 'enqueue']);
+        add_action('wp_footer', [__CLASS__, 'overlay_html']);
     }
 
-    public static function add_endpoint() {
-        add_rewrite_endpoint('complete-registration', EP_ROOT | EP_PAGES);
-    }
-
-    public static function query_vars($vars) {
-        $vars[] = 'complete-registration';
-        return $vars;
-    }
-
-    /**
-     * Handle form submission
-     */
-    public static function maybe_handle_post() {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') return;
-        if (empty($_POST['oval15_complete_registration_nonce']) || !wp_verify_nonce($_POST['oval15_complete_registration_nonce'], 'oval15_complete_registration')) {
+    public static function enqueue() {
+        if (!is_singular()) return;
+        global $post;
+        if (!$post) return;
+        $content = $post->post_content;
+        if (strpos($content, 'oval15_complete_registration') === false &&
+            strpos($content, 'oval15_profile_edit') === false) {
             return;
         }
 
-        $user_id = get_current_user_id();
-        if (!$user_id) return;
+        wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css', [], '4.1.0');
+        wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', ['jquery'], '4.1.0', true);
 
-        $fields = [
-            'f_name'   => sanitize_text_field($_POST['f_name'] ?? ''),
-            'l_name'   => sanitize_text_field($_POST['l_name'] ?? ''),
-            'gender'   => sanitize_text_field($_POST['gender'] ?? ''),
-            'dob'      => sanitize_text_field($_POST['dob'] ?? ''),
-            'main-position' => sanitize_text_field($_POST['main-position'] ?? ''),
-            'secondary-position' => array_map('sanitize_text_field', $_POST['secondary-position'] ?? []),
-            'lop'      => sanitize_text_field($_POST['lop'] ?? ''),
-            'c_number' => sanitize_text_field($_POST['c_number'] ?? ''),
-            'country_code' => sanitize_text_field($_POST['country_code'] ?? ''),
-            'nation'   => sanitize_text_field($_POST['nation'] ?? ''),
-            'passport' => array_map('sanitize_text_field', $_POST['passport'] ?? []),
-            'current_location_country' => sanitize_text_field($_POST['current_location_country'] ?? ''),
-            'weight'   => intval($_POST['weight'] ?? 0),
-            'height'   => intval($_POST['height'] ?? 0),
-            'club_1'   => sanitize_text_field($_POST['club_1'] ?? ''),
-            'tournament_1' => sanitize_text_field($_POST['tournament_1'] ?? ''),
-            'period_1' => sanitize_text_field($_POST['period_1'] ?? ''),
-            'club_2'   => sanitize_text_field($_POST['club_2'] ?? ''),
-            'tournament_2' => sanitize_text_field($_POST['tournament_2'] ?? ''),
-            'period_2' => sanitize_text_field($_POST['period_2'] ?? ''),
-            'club_3'   => sanitize_text_field($_POST['club_3'] ?? ''),
-            'tournament_3' => sanitize_text_field($_POST['tournament_3'] ?? ''),
-            'period_3' => sanitize_text_field($_POST['period_3'] ?? ''),
-            'p_profile' => wp_kses_post($_POST['p_profile'] ?? ''),
-            'v_link'   => esc_url_raw($_POST['v_link'] ?? ''),
-            'level'    => array_map('sanitize_text_field', $_POST['level'] ?? []),
-            'interested_country' => array_map('sanitize_text_field', $_POST['interested_country'] ?? []),
-            'degree'   => array_map('sanitize_text_field', $_POST['degree'] ?? []),
-            'fitness_stats' => sanitize_text_field($_POST['fitness_stats'] ?? ''),
-            'months'   => sanitize_text_field($_POST['months'] ?? ''),
-            'years'    => sanitize_text_field($_POST['years'] ?? ''),
-            'reason'   => sanitize_text_field($_POST['reason'] ?? ''),
-        ];
+        wp_enqueue_style('intl-tel-input', 'https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/css/intlTelInput.css', [], '18.2.1');
+        wp_enqueue_script('intl-tel-input', 'https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/intlTelInput.min.js', [], '18.2.1', true);
 
-        foreach ($fields as $key => $val) {
-            update_user_meta($user_id, $key, $val);
-        }
+        wp_enqueue_script('ckeditor5', 'https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js', [], '41.4.2', true);
 
-        // Handle profile photo
-        if (!empty($_FILES['p_photo']['name'])) {
-            require_once ABSPATH . 'wp-admin/includes/file.php';
-            $upload = wp_handle_upload($_FILES['p_photo'], ['test_form' => false]);
-            if (!isset($upload['error'])) {
-                update_user_meta($user_id, 'p_photo', esc_url_raw($upload['url']));
-            }
-        }
-
-        // Handle video upload
-        if (!empty($_FILES['v_upload_id']['name'])) {
-            Video::handle_upload($_FILES['v_upload_id']);
-        }
-
-        wp_redirect(add_query_arg(['updated' => 'true'], wp_get_referer()));
-        exit;
+        wp_add_inline_script('ckeditor5', self::init_js());
     }
 
-    /**
-     * Render form on the endpoint
-     */
-    public static function render_form($content) {
-        global $wp_query;
+    private static function init_js() {
+        return <<<JS
+        (function($){
+            if ($.fn.select2) {
+                $('.select2_box').each(function(){
+                    try { $(this).select2(); } catch(e) { console.warn('Select2 failed', e); }
+                });
+            }
+            if (window.ClassicEditor && typeof ClassicEditor.create === 'function') {
+                var el = document.getElementById('profile');
+                if (el) {
+                    ClassicEditor.create(el).catch(function(e){ console.warn('CKEditor error', e); });
+                }
+            }
+            var telInput = document.querySelector('#reg_contact_number');
+            if (telInput && window.intlTelInput) {
+                var iti = window.intlTelInput(telInput, {
+                    initialCountry: 'auto',
+                    separateDialCode: true,
+                    utilsScript: 'https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/utils.js'
+                });
+                function syncDialCode(){
+                    var c = iti.getSelectedCountryData();
+                    $('#country-code').val(c ? ('+' + (c.dialCode||'')) : '');
+                }
+                telInput.addEventListener('countrychange', syncDialCode);
+                telInput.addEventListener('blur', syncDialCode);
+                syncDialCode();
+            }
+            $('.oval15-complete-registration').on('submit', function(){
+                var $btn = $(this).find('button[type=submit]');
+                $btn.prop('disabled', true).text('Submitting…');
+                $('#oval15-loading').fadeIn(200);
+            });
+        })(jQuery);
+JS;
+    }
 
-        if (!isset($wp_query->query_vars['complete-registration'])) return $content;
-
-        ob_start();
-
-        $order_id = isset($_GET['order']) ? absint($_GET['order']) : 0;
-        if ($order_id && ($order = wc_get_order($order_id))) {
-            echo '<div class="oval15-order-summary">';
-            echo '<h2>Order Information</h2>';
-            echo '<p><strong>Order #:</strong> ' . esc_html($order->get_order_number()) . '</p>';
-            echo '<p><strong>Total:</strong> ' . wp_kses_post($order->get_formatted_order_total()) . '</p>';
-            echo '<p><strong>Status:</strong> ' . esc_html(wc_get_order_status_name($order->get_status())) . '</p>';
-            echo '</div>';
+    public static function overlay_html() {
+        if (!is_singular()) return;
+        global $post;
+        if (!$post) return;
+        $content = $post->post_content;
+        if (strpos($content, 'oval15_complete_registration') === false &&
+            strpos($content, 'oval15_profile_edit') === false) {
+            return;
         }
-
-        $user_id = get_current_user_id();
-        if (!$user_id) {
-            echo '<p>You must be logged in to complete registration.</p>';
-            return ob_get_clean();
-        }
-
-        $meta = get_user_meta($user_id);
-
-        include __DIR__ . '/templates/complete-registration-form.php';
-
-        return ob_get_clean();
+        echo '<div id="oval15-loading" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+            background:rgba(255,255,255,0.85);z-index:9999;text-align:center;padding-top:20%;">
+            <h2>Submitting, please wait…</h2>
+        </div>';
     }
 }
