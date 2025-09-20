@@ -31,9 +31,10 @@ class Video {
         }
 
         // Ensure WP upload helpers available
-        if (!function_exists('wp_handle_upload')) require_once ABSPATH . 'wp-admin/includes/file.php';
+        if (!function_exists('wp_handle_upload'))  require_once ABSPATH . 'wp-admin/includes/file.php';
         if (!function_exists('wp_insert_attachment')) require_once ABSPATH . 'wp-admin/includes/media.php';
         if (!function_exists('wp_generate_attachment_metadata')) require_once ABSPATH . 'wp-admin/includes/image.php';
+        if (!function_exists('wp_read_video_metadata')) require_once ABSPATH . 'wp-admin/includes/media.php';
 
         // Size validation
         $size_mb = isset($file['size']) ? ($file['size'] / 1048576) : 0;
@@ -46,6 +47,7 @@ class Video {
             'mp4'  => 'video/mp4',
             'mov'  => 'video/quicktime',
             'webm' => 'video/webm',
+            'ogg'  => 'video/ogg',
         ];
 
         $overrides = ['test_form' => false, 'mimes' => $mimes];
@@ -69,7 +71,7 @@ class Video {
             return $attach_id;
         }
 
-        // Generate attachment metadata
+        // Generate attachment metadata (works for video & image)
         $attach_data = wp_generate_attachment_metadata($attach_id, $movefile['file']);
         wp_update_attachment_metadata($attach_id, $attach_data);
 
