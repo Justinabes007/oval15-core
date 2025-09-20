@@ -6,7 +6,6 @@ use Oval15\Core\Media\Video;
 if (!defined('ABSPATH')) exit;
 
 class Endpoint {
-    // Shortcode + action/nonce names
     const SLUG         = 'oval15-complete-registration';
     const SHORTCODE    = 'oval15_complete_registration';
     const NONCE        = 'oval15_complete_registration_nonce';
@@ -21,92 +20,51 @@ class Endpoint {
         // Handle POST
         add_action('template_redirect', [__CLASS__, 'maybe_handle_post']);
 
-        // Assets only when needed
-        add_action('wp_enqueue_scripts', [__CLASS__, 'maybe_enqueue_form_assets']);
-
-        // Fallback: if the “complete-registration” page has no shortcode, inject one
+        // Inject shortcode if page content doesn’t include it
         add_filter('the_content', [__CLASS__, 'inject_shortcode_fallback']);
-    }
 
-    /** Only enqueue UI assets on pages that contain our shortcode */
-    public static function maybe_enqueue_form_assets() {
-        if (!is_singular()) return;
-        global $post;
-        if (!$post) return;
-
-        $has = has_shortcode($post->post_content, self::SHORTCODE)
-            || has_shortcode($post->post_content, 'complete_registration')
-            || has_shortcode($post->post_content, 'complete-registration');
-
-        if (!$has && (get_post_field('post_name', $post) !== 'complete-registration')) return;
-
-        // Select2 CSS/JS
-        wp_enqueue_style('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css', [], '4.1.0');
-        wp_enqueue_script('select2', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', ['jquery'], '4.1.0', true);
-
-        // intl-tel-input
-        wp_enqueue_style('intl-tel-input', 'https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/css/intlTelInput.css', [], '18.2.1');
-        wp_enqueue_script('intl-tel-input', 'https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/intlTelInput.min.js', [], '18.2.1', true);
-
-        // CKEditor 5 (Classic)
-        wp_enqueue_script('ckeditor5', 'https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js', [], '41.4.2', true);
-
-        // Lightweight overlay CSS
-        $css = '#oval15-loading{display:none;position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:9999}
+        // Minimal CSS (no external libraries)
+        add_action('wp_head', function () {
+            if (!is_singular()) return;
+            $css = '#oval15-loading{display:none;position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:9999}
 #oval15-loading .spinner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:16px}
-.ck.ck-editor{max-width:100%}';
-        wp_add_inline_style('select2', $css);
-
-        // Init widgets + submit overlay
-        $js = <<<JS
-(function($){
-    // Select2
-    $(document).ready(function(){
-        $('.select2_box').each(function(){
-            try { $(this).select2(); } catch(e) { console.warn('Select2 failed', e); }
+.oval15-order-context{margin:15px 0 20px;padding:12px 14px;border:1px solid #ddd;border-radius:6px;background:#fafafa}
+.oval15-complete-registration .form-group{margin:10px 0}
+.oval15-complete-registration label{font-weight:600}
+.oval15-complete-registration input[type=text],
+.oval15-complete-registration input[type=number],
+.oval15-complete-registration input[type=email],
+.oval15-complete-registration input[type=tel],
+.oval15-complete-registration input[type=url],
+.oval15-complete-registration input[type=date],
+.oval15-complete-registration select,
+.oval15-complete-registration textarea{width:100%;max-width:520px}
+';
+            echo "<style>$css</style>";
         });
+
+        // Minimal submit overlay JS (no CKEditor/Select2/etc.)
+        add_action('wp_footer', function () {
+            if (!is_singular()) return;
+            ?>
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+  var forms = document.querySelectorAll('.oval15-complete-registration');
+  forms.forEach(function(f){
+    f.addEventListener('submit', function(){
+      var btn = f.querySelector('button[type="submit"]');
+      if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
+      var overlay = document.getElementById('oval15-loading');
+      if(overlay){ overlay.style.display = 'block'; }
     });
-
-    // CKEditor (guard against double load)
-    if (window.ClassicEditor && typeof ClassicEditor.create==='function') {
-        var el = document.getElementById('profile');
-        if (el && !el.getAttribute('data-ck-initialized')) {
-            el.setAttribute('data-ck-initialized','1');
-            ClassicEditor.create(el).catch(function(e){ console.warn('CKEditor error', e); });
-        }
-    }
-
-    // intl-tel-input
-    var telInput = document.querySelector('#c_number');
-    if (telInput && window.intlTelInput) {
-        var iti = window.intlTelInput(telInput, {
-            initialCountry: 'auto',
-            separateDialCode: true,
-            utilsScript: 'https://cdn.jsdelivr.net/npm/intl-tel-input@18.2.1/build/js/utils.js'
+  });
+});
+</script>
+<?php
         });
-        function syncDialCode(){
-            var c = iti.getSelectedCountryData();
-            var dial = c && c.dialCode ? '+'+c.dialCode : '';
-            var hidden = document.getElementById('country-code');
-            if (hidden) hidden.value = dial;
-        }
-        telInput.addEventListener('countrychange', syncDialCode);
-        telInput.addEventListener('blur', syncDialCode);
-        syncDialCode();
     }
 
-    // Submit overlay
-    $(document).on('submit', '.oval15-complete-registration', function(){
-        var $btn = $(this).find('button[type=submit]');
-        $btn.prop('disabled', true).text('Submitting…');
-        $('#oval15-loading').fadeIn(150);
-    });
-})(jQuery);
-JS;
-        wp_add_inline_script('ckeditor5', $js);
-    }
-
-    /** Inject shortcode if editor forgot to add it on the Complete Registration page */
+    /** If “Complete Registration” page exists without shortcode, inject ours. */
     public static function inject_shortcode_fallback($content) {
         if (!is_singular()) return $content;
         global $post;
@@ -122,12 +80,14 @@ JS;
             || has_shortcode($content, 'complete-registration');
 
         if ($has) return $content;
-        return $content . "\n\n[oval15_complete_registration]";
+
+        // Append our shortcode so the page always renders the form
+        return $content . "\n\n[" . self::SHORTCODE . "]";
     }
 
     /** Shortcode renderer */
     public static function shortcode($atts = []) {
-        // Resolve order context (even if logged out, so page isn’t blank)
+        // Validate Woo order context (optional)
         $order = null;
         if (!empty($_GET['order']) && !empty($_GET['key'])) {
             $order_id  = absint($_GET['order']);
@@ -140,9 +100,8 @@ JS;
 
         if (!is_user_logged_in()) {
             ob_start();
-            ?>
-            <?php if ($order instanceof \WC_Order): ?>
-                <div class="oval15-order-context" style="margin:15px 0;padding:12px 14px;border:1px solid #ddd;border-radius:6px;background:#fafafa">
+            if ($order instanceof \WC_Order): ?>
+                <div class="oval15-order-context">
                     <strong>Order #<?php echo esc_html($order->get_order_number()); ?></strong>
                     — <?php echo esc_html(wc_format_datetime($order->get_date_created())); ?> —
                     Total: <?php echo wp_kses_post($order->get_formatted_order_total()); ?>
@@ -176,12 +135,10 @@ JS;
     public static function maybe_handle_post() {
         if (empty($_POST['action']) || $_POST['action'] !== self::ACTION_POST) return;
 
-        // Nonce first (avoid output before redirect)
         if (!isset($_POST[self::NONCE]) || !wp_verify_nonce($_POST[self::NONCE], self::NONCE)) {
             wc_add_notice(__('Security check failed. Please try again.'), 'error');
             return;
         }
-
         if (!is_user_logged_in()) {
             wc_add_notice(__('You must be logged in.'), 'error');
             return;
@@ -190,27 +147,24 @@ JS;
         $user_id = get_current_user_id();
         $clean   = self::sanitize_input($_POST);
 
-        // Core WP user fields
+        // Core user fields
         wp_update_user([
             'ID'         => $user_id,
             'first_name' => $clean['f_name'],
             'last_name'  => $clean['l_name'],
         ]);
 
-        // Simple meta map (keys match your live schema)
+        // Meta
         foreach (self::meta_map() as $post_key => $meta_key) {
             if (array_key_exists($post_key, $clean)) {
                 update_user_meta($user_id, $meta_key, $clean[$post_key]);
             }
         }
-
-        // Arrays
         update_user_meta($user_id, 'secondary-position', $clean['secondary-position']);
         update_user_meta($user_id, 'passport', $clean['passport']);
 
-        // Combined phone display convenience
         if (!empty($clean['country_code']) && !empty($clean['c_number'])) {
-            update_user_meta($user_id, 'contact_number_combined', trim($clean['country_code']) . ' ' . trim($clean['c_number']));
+            update_user_meta($user_id, 'contact_number_combined', trim($clean['country_code']).' '.trim($clean['c_number']));
         }
 
         // Photo (optional)
@@ -221,11 +175,10 @@ JS;
             }
         }
 
-        // Video: upload (preferred) or URL
+        // Video (optional) — pass the actual $_FILES array to Video::handle_upload
         if (!empty($_FILES['v_upload_id']['name'])) {
-            // Use helper expecting the full $_FILES[...] array
             if (class_exists('\Oval15\Core\Media\Video')) {
-                $vid_id = Video::handle_upload($_FILES['v_upload_id'], 100 /*MB*/);
+                $vid_id = Video::handle_upload($_FILES['v_upload_id'], 100);
             } else {
                 $vid_id = self::handle_upload_generic($_FILES['v_upload_id']);
             }
@@ -237,7 +190,7 @@ JS;
             update_user_meta($user_id, 'yt_video', esc_url_raw($clean['yt_video']));
         }
 
-        // Woo order context
+        // Woo order context (optional)
         $order_id  = !empty($_POST['order_id']) ? absint($_POST['order_id']) : 0;
         $order_key = !empty($_POST['order_key']) ? wc_clean(wp_unslash($_POST['order_key'])) : '';
         if ($order_id && $order_key) {
@@ -256,14 +209,14 @@ JS;
         }
 
         wc_add_notice(__('Registration details saved.'), 'success');
-        // Bounce back to the same page to show notices & avoid resubmission
+
         $redirect = remove_query_arg(['updated'], wp_get_referer() ?: home_url('/'));
         $redirect = add_query_arg(['updated'=>1], $redirect);
         wp_safe_redirect($redirect);
         exit;
     }
 
-    /** Prefill data from user meta */
+    /** Prefill */
     private static function get_prefill($user_id) {
         $u = get_userdata($user_id);
         $getm = function($k,$d='') use($user_id){ $v=get_user_meta($user_id,$k,true); return ($v===''? $d : $v); };
@@ -299,7 +252,7 @@ JS;
         ];
     }
 
-    /** Sanitize incoming POST */
+    /** Sanitize */
     private static function sanitize_input($src) {
         $clean = [];
         $sf = function($k,$d='') use($src){ return isset($src[$k]) ? wc_clean(wp_unslash($src[$k])) : $d; };
@@ -333,16 +286,13 @@ JS;
             $clean["period_{$i}"]     = $sf("period_{$i}");
         }
 
-        // Rich text
         $clean['p_profile'] = isset($src['p_profile']) ? wp_kses_post(wp_unslash($src['p_profile'])) : '';
-
-        // URL
         $clean['yt_video']  = isset($src['yt_video']) ? esc_url_raw(wp_unslash($src['yt_video'])) : '';
 
         return $clean;
     }
 
-    /** POST→meta map (keep your live keys) */
+    /** Meta map */
     private static function meta_map() {
         return [
             'gender'  => 'gender',
@@ -371,20 +321,16 @@ JS;
         ];
     }
 
-    /** Generic upload helper for photos/videos when Video::handle_upload isn't used */
+    /** Generic upload helper */
     private static function handle_upload_generic(array $file) {
         if (empty($file['name'])) return new \WP_Error('no_file', 'No file uploaded');
-
         if (!function_exists('wp_handle_upload')) require_once ABSPATH . 'wp-admin/includes/file.php';
         if (!function_exists('wp_insert_attachment')) require_once ABSPATH . 'wp-admin/includes/media.php';
         if (!function_exists('wp_generate_attachment_metadata')) require_once ABSPATH . 'wp-admin/includes/image.php';
 
         $overrides = ['test_form' => false];
         $movefile  = wp_handle_upload($file, $overrides);
-
-        if (isset($movefile['error'])) {
-            return new \WP_Error('upload_error', $movefile['error']);
-        }
+        if (isset($movefile['error'])) return new \WP_Error('upload_error', $movefile['error']);
 
         $attachment = [
             'post_mime_type' => $movefile['type'],
@@ -400,7 +346,7 @@ JS;
         return $attach_id;
     }
 
-    /** Positions list */
+    /** Positions */
     public static function positions() {
         return [
             'Prop (1)','Hooker','Prop (3)','Lock (4)','Lock (5)','Flank (Openside)','Flank (Blindside)',
@@ -408,7 +354,7 @@ JS;
         ];
     }
 
-    /** Countries list (curated to match your current UI) */
+    /** Countries (curated) */
     public static function countries() {
         return [
             'Angola','Argentina','Australia','Belgium','Brazil','Canada','Chile','China','Czech Republic',

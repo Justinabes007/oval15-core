@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) exit;
 <div id="oval15-loading"><div class="spinner">Submitting… please wait</div></div>
 
 <?php if ($order instanceof \WC_Order): ?>
-    <div class="oval15-order-context" style="margin:15px 0 20px;padding:12px 14px;border:1px solid #ddd;border-radius:6px;background:#fafafa">
+    <div class="oval15-order-context">
         <strong>Order #<?php echo esc_html($order->get_order_number()); ?></strong>
         — <?php echo esc_html(wc_format_datetime($order->get_date_created())); ?> —
         Total: <?php echo wp_kses_post($order->get_formatted_order_total()); ?>
@@ -28,19 +28,16 @@ if (!defined('ABSPATH')) exit;
     <div class="form-group">
         <p><label for="f_name">First Name <span class="required">*</span></label></p>
         <p><input type="text" class="form-control" id="f_name" name="f_name" required value="<?php echo esc_attr($data['f_name']); ?>"></p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="l_name">Last Name <span class="required">*</span></label></p>
         <p><input type="text" class="form-control" id="l_name" name="l_name" required value="<?php echo esc_attr($data['l_name']); ?>"></p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="email">Email <span class="required">*</span></label></p>
         <p><input type="email" class="form-control" id="email" name="email" readonly required value="<?php echo esc_attr($u->user_email); ?>"></p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
@@ -51,7 +48,6 @@ if (!defined('ABSPATH')) exit;
                 <option value="Female" <?php selected($data['gender'],'Female'); ?>>Female</option>
             </select>
         </p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
@@ -59,7 +55,6 @@ if (!defined('ABSPATH')) exit;
         <p><input type="date" class="input-text" name="dob" id="dob" value="<?php echo esc_attr($data['dob']); ?>"></p>
     </div>
 
-    <p class="form-row form-row-last"></p>
     <p><label for="main-position">Main Position</label></p>
     <p>
         <select class="input-text" name="main-position" id="main-position">
@@ -70,10 +65,9 @@ if (!defined('ABSPATH')) exit;
         </select>
     </p>
 
-    <p class="form-row form-row-last"></p>
     <p><label for="secondary-position">Secondary Position(s)</label></p>
     <p>
-        <select class="input-text select2_box" name="secondary-position[]" id="secondary-position" multiple>
+        <select class="input-text" name="secondary-position[]" id="secondary-position" multiple size="6" style="max-width:520px;">
             <?php foreach ($positions as $p): ?>
                 <option value="<?php echo esc_attr($p); ?>" <?php echo in_array($p,(array)$data['secondary-position'],true)?'selected':''; ?>><?php echo esc_html($p); ?></option>
             <?php endforeach; ?>
@@ -89,62 +83,55 @@ if (!defined('ABSPATH')) exit;
                 <option value="Professional" <?php selected($data['lop'],'Professional'); ?>>Professional</option>
             </select>
         </p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="c_number">Contact number <span class="required">*</span></label></p>
         <p><input type="tel" class="form-control" id="c_number" name="c_number" required value="<?php echo esc_attr($data['c_number']); ?>" autocomplete="off"></p>
-        <p><span class="error color-danger"></span></p>
         <input type="hidden" value="<?php echo esc_attr($data['country_code']); ?>" name="country_code" id="country-code">
     </div>
 
     <div class="form-group">
         <p><label for="nation">Nationality <span class="required">*</span></label></p>
         <p>
-            <select class="input-text select2_box" name="nation" id="nation" required>
+            <select class="input-text" name="nation" id="nation" required>
                 <?php foreach ($countries as $c): ?>
                     <option value="<?php echo esc_attr($c); ?>" <?php selected($data['nation'],$c); ?>><?php echo esc_html($c); ?></option>
                 <?php endforeach; ?>
             </select>
         </p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="passport">Passport <span class="required">*</span></label></p>
         <p>
-            <select class="input-text select2_box" name="passport[]" id="passport" required multiple>
+            <select class="input-text" name="passport[]" id="passport" required multiple size="8" style="max-width:520px;">
                 <?php foreach ($countries as $c): ?>
                     <option value="<?php echo esc_attr($c); ?>" <?php echo in_array($c,(array)$data['passport'],true)?'selected':''; ?>><?php echo esc_html($c); ?></option>
                 <?php endforeach; ?>
             </select>
         </p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="current_location_country">Current Location (Country) <span class="required">*</span></label></p>
         <p>
-            <select class="input-text select2_box" name="current_location_country" id="current_location_country" required>
+            <select class="input-text" name="current_location_country" id="current_location_country" required>
                 <?php foreach ($countries as $c): ?>
                     <option value="<?php echo esc_attr($c); ?>" <?php selected($data['current_location_country'],$c); ?>><?php echo esc_html($c); ?></option>
                 <?php endforeach; ?>
             </select>
         </p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="weight">Weight (In KG) <span class="required">*</span></label></p>
         <p><input type="number" class="form-control" id="weight" name="weight" required value="<?php echo esc_attr($data['weight']); ?>"></p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group">
         <p><label for="height">Height (In CM) <span class="required">*</span></label></p>
         <p><input type="number" class="form-control" id="height" name="height" min="150" max="1000" step="1" required value="<?php echo esc_attr($data['height']); ?>"></p>
-        <p><span class="error color-danger"></span></p>
     </div>
 
     <div class="form-group" style="display:flex;gap:10px;margin:0;">
@@ -168,23 +155,19 @@ if (!defined('ABSPATH')) exit;
     </div>
 
     <h3>Current playing history</h3>
-
     <?php for ($i=1; $i<=3; $i++): ?>
         <div class="form-group" style="display:flex;gap:10px;margin:0;">
             <div>
                 <p><label for="club_<?php echo $i; ?>">Club Name<?php echo $i===1 ? ' <span class="required">*</span>':''; ?></label></p>
                 <p><input type="text" class="form-control" id="club_<?php echo $i; ?>" name="club_<?php echo $i; ?>" <?php echo $i===1?'required':''; ?> value="<?php echo esc_attr($data["club_{$i}"]); ?>"></p>
-                <p><span class="error color-danger"></span></p>
             </div>
             <div>
                 <p><label for="tournament_<?php echo $i; ?>">League<?php echo $i===1 ? ' <span class="required">*</span>':''; ?></label></p>
                 <p><input type="text" class="form-control" id="tournament_<?php echo $i; ?>" name="tournament_<?php echo $i; ?>" <?php echo $i===1?'required':''; ?> value="<?php echo esc_attr($data["tournament_{$i}"]); ?>"></p>
-                <p><span class="error color-danger"></span></p>
             </div>
             <div>
                 <p><label for="period_<?php echo $i; ?>">Period<?php echo $i===1 ? ' <span class="required">*</span>':''; ?></label></p>
                 <p><input type="text" class="form-control" id="period_<?php echo $i; ?>" name="period_<?php echo $i; ?>" <?php echo $i===1?'required':''; ?> value="<?php echo esc_attr($data["period_{$i}"]); ?>"></p>
-                <p><span class="error color-danger"></span></p>
             </div>
         </div>
     <?php endfor; ?>
@@ -195,18 +178,13 @@ if (!defined('ABSPATH')) exit;
 
     <div class="form-group">
         <p><label for="profile">Profile <span class="required">*</span></label></p>
-        <p>
-            <textarea name="p_profile" class="p-profile-count" id="profile" cols="50" rows="10"><?php echo esc_textarea($data['p_profile']); ?></textarea>
-        </p>
-        <p><span class="error color-danger"></span></p>
-        <div id="word-count"></div>
+        <p><textarea name="p_profile" id="profile" cols="50" rows="10"><?php echo esc_textarea($data['p_profile']); ?></textarea></p>
     </div>
 
     <h3>Video footage</h3>
     <div class="form-group">
-        <p><label for="yt_video">Video Link (YouTube or Vimeo Link Only)</label></p>
+        <p><label for="yt_video">Video Link (YouTube/Vimeo)</label></p>
         <p><input type="url" class="form-control" id="yt_video" name="yt_video" value="<?php echo esc_attr($data['yt_video']); ?>"></p>
-        <p><span class="error color-danger"></span></p>
     </div>
     <div class="form-group">
         <p><label for="v_upload_id">Or upload a video (mp4/mov/webm)</label></p>
@@ -214,7 +192,6 @@ if (!defined('ABSPATH')) exit;
     </div>
 
     <h3>Upload Photo (Square Shaped)</h3>
-    <p class="form-row form-row-last"></p>
     <p><label for="upload_photo">Profile Pic</label></p>
     <p><input type="file" class="input-text" name="upload_photo" id="upload_photo" accept="image/png, image/jpeg, image/webp"></p>
 
