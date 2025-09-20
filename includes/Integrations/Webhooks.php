@@ -275,7 +275,6 @@ class Webhooks {
     public static function on_order_completed($order_id) {
         $order_obj = self::build_order_object($order_id);
 
-        // If we can, enrich with WP user + profile snapshot
         $user_id = (int) ($order_obj['customer_id'] ?? 0);
         $data = [
             'order' => $order_obj,
@@ -292,9 +291,6 @@ class Webhooks {
      * Builders
      * ========================= */
 
-    /**
-     * Build a normalized user object with account & billing details.
-     */
     private static function build_user_object($user_id, $order_id = 0) {
         $user_id = (int) $user_id;
         $user    = $user_id ? get_user_by('id', $user_id) : null;
@@ -310,7 +306,6 @@ class Webhooks {
             'last_name'  => $last,
         ];
 
-        // If an order is provided, include billing name/email fallback
         if ($order_id && function_exists('wc_get_order')) {
             $order = wc_get_order($order_id);
             if ($order) {
@@ -326,16 +321,12 @@ class Webhooks {
         return $obj;
     }
 
-    /**
-     * Build a normalized order object with items and billing details.
-     */
     private static function build_order_object($order_id) {
         if (!function_exists('wc_get_order')) return ['order_id' => (int) $order_id];
 
         $order = wc_get_order($order_id);
         if (!$order) return ['order_id' => (int) $order_id];
 
-        // Items as a normal array (Zapier-friendly)
         $items = [];
         $product_ids = [];
         foreach ($order->get_items() as $item_id => $item) {
@@ -364,15 +355,37 @@ class Webhooks {
             'billing_city'       => (string) $order->get_billing_city(),
             'items'       => $items,
             'product_ids' => array_values(array_unique($product_ids)),
-            // Link to registration user if set
             'registration_user' => (int) $order->get_meta('_oval15_registration_user'),
         ];
     }
 
-    /**
+     /**
      * Snapshot of important user meta for integrations.
+     * ✅ Patched to align legacy field names used by theme/templates.
+     *    - Primary keys exposed to integrations:
+     *        profile       ← profile (fallback p_profile)
+     *        upload_photo  ← upload_photo (fallback p_photo_id)
+     *        link          ← link (fallback v_link)
+     *    - Back-compat: we ALSO include the old keys (p_profile, p_photo_id, v_link)
+     *      so existing zaps/scenarios don’t break. Both will be present.
      */
     private static function user_profile_snapshot($user_id) {
+        $user_id = (int) $user_id;
+
+        // Read both legacy and newer keys to keep everything in sync.
+        $profile_legacy = (string) get_user_meta($user_id, 'profile', true);
+        $profile_old    = (string) get_user_meta($user_id, 'p_profile', true);
+        $photo_legacy   = get_user_meta($user_id, 'upload_photo', true);
+        $photo_old      = get_user_meta($user_id, 'p_photo_id', true);
+        $link_legacy    = (string) get_user_meta($user_id, 'link', true);
+        $link_old       = (string) get_user_meta($user_id, 'v_link', true);
+
+        // Choose primary values with sensible fallbacks
+        $profile      = $profile_legacy !== '' ? $profile_legacy : $profile_old;
+        $upload_photo = $photo_legacy ? $photo_legacy : $photo_old;
+        $link         = $link_legacy !== '' ? $link_legacy : $link_old;
+
+        // Build a rich snapshot (keep your original wide set)
         $fields = [
             'first_name','last_name','gender','nation','current_location_country',
             'height','weight','years','months','level','league',
@@ -380,14 +393,31 @@ class Webhooks {
             'tournament_1','tournament_2','tournament_3',
             'main-position','secondary-position',
             'interested_country','passport',
-            'v_links','v_upload_id','v_link', // legacy primary still included
-            'p_profile','p_photo_id',
+            'v_links','v_upload_id',
+            // Keep old key present for back-compat:
+            'p_profile','p_photo_id','v_link',
+            // Also expose other keys the site actually uses:
+            'nationality','period','club','period_2','club_2','period_3','club_3',
             '_oval15_sole_rep','_oval15_marketing_consent','_oval15_approved',
         ];
-        $out = ['id' => (int) $user_id];
+
+        $out = ['id' => $user_id];
+
+        // Copy wide set verbatim
         foreach ($fields as $k) {
             $out[$k] = get_user_meta($user_id, $k, true);
         }
+
+        // ✅ Add the canonical (legacy-aligned) keys your templates depend on
+        $out['profile']      = $profile;           // canonical
+        $out['upload_photo'] = $upload_photo;      // canonical (attachment ID)
+        $out['link']         = $link;              // canonical (primary video link)
+
+        // For clarity, also ensure the old keys mirror the canonical where empty
+        if ($out['p_profile'] === '')   $out['p_profile']   = $profile;
+        if (!$out['p_photo_id'])        $out['p_photo_id']  = $upload_photo;
+        if ($out['v_link'] === '')      $out['v_link']      = $link;
+
         return $out;
     }
 }
