@@ -43,5 +43,5 @@ add_action('plugins_loaded', function () {
     \Oval15\Core\Admin\Approvals::init();
     \Oval15\Core\Integrations\Webhooks::init();
     \Oval15\Core\Registration\ProfileEdit::init();
-    \Oval15\Core\Diagnostics\ContractGuard::init();
 });
+
