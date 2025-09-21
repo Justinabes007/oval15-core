@@ -82,26 +82,15 @@ class Approvals {
     public static function handle_bulk($redirect_to, $action, $user_ids) {
         if (!current_user_can('manage_woocommerce')) return $redirect_to;
 
-        $ok = 0; 
-        $now = current_time('mysql'); 
-        $admin = get_current_user_id();
+        $ok = 0; $now = current_time('mysql'); $admin = get_current_user_id();
 
         if ($action === 'oval15_approve') {
             foreach ($user_ids as $uid) {
-                $uid = (int) $uid;
-                $prev = strtolower((string) get_user_meta($uid, self::META_APPROVED, true));
-
                 update_user_meta($uid, self::META_APPROVED, 'yes');       // triggers Welcome via Emails module
                 update_user_meta($uid, self::META_APPROVED_AT, $now);
                 update_user_meta($uid, self::META_APPROVED_BY, $admin);
                 delete_user_meta($uid, self::META_DECLINED_AT);
                 delete_user_meta($uid, self::META_DECLINED_BY);
-
-                // Emit only the relevant event, and only if status changed
-                if ($prev !== 'yes') {
-                    do_action('oval15/user_approved', $uid, $admin);
-                }
-
                 $ok++;
             }
             return add_query_arg(['oval15_bulk_approved' => $ok], $redirect_to);
@@ -109,20 +98,11 @@ class Approvals {
 
         if ($action === 'oval15_decline') {
             foreach ($user_ids as $uid) {
-                $uid = (int) $uid;
-                $prev = strtolower((string) get_user_meta($uid, self::META_APPROVED, true));
-
                 update_user_meta($uid, self::META_APPROVED, 'no');
                 update_user_meta($uid, self::META_DECLINED_AT, $now);
                 update_user_meta($uid, self::META_DECLINED_BY, $admin);
                 delete_user_meta($uid, self::META_APPROVED_AT);
                 delete_user_meta($uid, self::META_APPROVED_BY);
-
-                // Emit only the relevant event, and only if status changed
-                if ($prev !== 'no') {
-                    do_action('oval15/user_declined', $uid, $admin);
-                }
-
                 $ok++;
             }
             return add_query_arg(['oval15_bulk_declined' => $ok], $redirect_to);
@@ -138,23 +118,14 @@ class Approvals {
         $uid = isset($_GET['user_id']) ? absint($_GET['user_id']) : 0;
         if (!$uid || !wp_verify_nonce($_GET['_wpnonce'] ?? '', 'oval15_user_action_'.$uid)) wp_die('Invalid nonce.');
 
-        $now = current_time('mysql'); 
-        $admin = get_current_user_id();
-        $prev = strtolower((string) get_user_meta($uid, self::META_APPROVED, true));
-
+        $now = current_time('mysql'); $admin = get_current_user_id();
         update_user_meta($uid, self::META_APPROVED, 'yes');  // triggers Welcome via Emails module
         update_user_meta($uid, self::META_APPROVED_AT, $now);
         update_user_meta($uid, self::META_APPROVED_BY, $admin);
         delete_user_meta($uid, self::META_DECLINED_AT);
         delete_user_meta($uid, self::META_DECLINED_BY);
 
-        // Emit BEFORE redirect; only the relevant event, and only if status changed
-        if ($prev !== 'yes') {
-            do_action('oval15/user_approved', $uid, $admin);
-        }
-
-        wp_safe_redirect(add_query_arg(['oval15_approved' => 1], wp_get_referer() ?: admin_url('users.php'))); 
-        exit;
+        wp_safe_redirect(add_query_arg(['oval15_approved' => 1], wp_get_referer() ?: admin_url('users.php'))); exit;
     }
 
     public static function decline_single() {
@@ -162,23 +133,14 @@ class Approvals {
         $uid = isset($_GET['user_id']) ? absint($_GET['user_id']) : 0;
         if (!$uid || !wp_verify_nonce($_GET['_wpnonce'] ?? '', 'oval15_user_action_'.$uid)) wp_die('Invalid nonce.');
 
-        $now = current_time('mysql'); 
-        $admin = get_current_user_id();
-        $prev = strtolower((string) get_user_meta($uid, self::META_APPROVED, true));
-
+        $now = current_time('mysql'); $admin = get_current_user_id();
         update_user_meta($uid, self::META_APPROVED, 'no');
         update_user_meta($uid, self::META_DECLINED_AT, $now);
         update_user_meta($uid, self::META_DECLINED_BY, $admin);
         delete_user_meta($uid, self::META_APPROVED_AT);
         delete_user_meta($uid, self::META_APPROVED_BY);
 
-        // Emit BEFORE redirect; only the relevant event, and only if status changed
-        if ($prev !== 'no') {
-            do_action('oval15/user_declined', $uid, $admin);
-        }
-
-        wp_safe_redirect(add_query_arg(['oval15_declined' => 1], wp_get_referer() ?: admin_url('users.php'))); 
-        exit;
+        wp_safe_redirect(add_query_arg(['oval15_declined' => 1], wp_get_referer() ?: admin_url('users.php'))); exit;
     }
 
     public static function resend_welcome() {
@@ -187,8 +149,7 @@ class Approvals {
         if (!$uid || !wp_verify_nonce($_GET['_wpnonce'] ?? '', 'oval15_user_action_'.$uid)) wp_die('Invalid nonce.');
 
         $ok = method_exists(Emails::class, 'resend_to_user') ? Emails::resend_to_user($uid) : false;
-        wp_safe_redirect(add_query_arg(['oval15_resend_welcome' => $ok ? '1' : '0'], wp_get_referer() ?: admin_url('users.php'))); 
-        exit;
+        wp_safe_redirect(add_query_arg(['oval15_resend_welcome' => $ok ? '1' : '0'], wp_get_referer() ?: admin_url('users.php'))); exit;
     }
 
     /* ---------- Notices ---------- */
